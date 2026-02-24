@@ -305,49 +305,109 @@ export default function App() {
   };
 
   const handleSaveJpg = () => {
-    if (!stageRef.current) return;
-    const fileName = prompt('Enter filename for JPG:', 'compare-pdf');
-    if (!fileName) return;
-    try {
-      const uri = stageRef.current.toDataURL({ pixelRatio: 2 });
-      const link = document.createElement('a');
-      link.download = `${fileName}.jpg`;
-      link.href = uri;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err) {
-      console.error('Save JPG failed:', err);
-      alert('Failed to save JPG. This might be due to a browser security restriction.');
+    console.log('Attempting to save JPG...');
+    const stage = stageRef.current;
+    
+    if (!isComparing) {
+      alert('Please start the comparison (upload both PDFs and click Start Comparison) before saving a JPG.');
+      return;
     }
+
+    if (!stage) {
+      alert('Comparison stage is not ready. Please try moving the view or zooming, then try again.');
+      return;
+    }
+    
+    const fileName = prompt('Enter filename for JPG:', v1FileName ? `${v1FileName.split('.')[0]}_compare` : 'compare-pdf');
+    if (!fileName) return;
+
+    setIsLoading(true);
+    
+    // Use a small timeout to allow the loading overlay to show
+    setTimeout(() => {
+      try {
+        console.log('Generating DataURL...');
+        // Use pixelRatio: 1 for maximum compatibility and speed
+        const uri = stage.toDataURL({ 
+          pixelRatio: 1,
+          mimeType: 'image/jpeg',
+          quality: 0.8
+        });
+        
+        if (!uri || uri === 'data:,') {
+          throw new Error('Generated image is empty');
+        }
+
+        console.log('Triggering download...');
+        const link = document.createElement('a');
+        link.download = `${fileName}.jpg`;
+        link.href = uri;
+        document.body.appendChild(link);
+        link.click();
+        
+        // Cleanup with delay
+        setTimeout(() => {
+          document.body.removeChild(link);
+          setIsLoading(false);
+        }, 100);
+      } catch (err) {
+        setIsLoading(false);
+        console.error('Save JPG failed:', err);
+        alert('Failed to save JPG. The comparison might be too large for your browser to process as a single image. Try zooming out or using a smaller window.');
+      }
+    }, 100);
   };
 
   const handleSaveProject = () => {
-    const fileName = prompt('Enter filename for Project:', 'compare-project');
-    if (!fileName) return;
-    try {
-      const project: CompareProject = {
-        v1DataUrl,
-        v2DataUrl,
-        v1Tinted,
-        v2Tinted,
-        v1FileName,
-        v2FileName,
-        v2Offset,
-        annotations,
-        zoom
-      };
-      const blob = new Blob([JSON.stringify(project)], { type: 'application/json' });
-      const link = document.createElement('a');
-      link.download = `${fileName}.comp`;
-      link.href = URL.createObjectURL(blob);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err) {
-      console.error('Save Project failed:', err);
-      alert('Failed to save project file.');
+    console.log('Attempting to save project...');
+    if (!v1DataUrl && !v2DataUrl) {
+      alert('No project data to save. Please upload at least one PDF first.');
+      return;
     }
+    
+    const fileName = prompt('Enter filename for Project:', v1FileName ? `${v1FileName.split('.')[0]}_project` : 'compare-project');
+    if (!fileName) return;
+
+    setIsLoading(true);
+    
+    setTimeout(() => {
+      try {
+        const project: CompareProject = {
+          v1DataUrl,
+          v2DataUrl,
+          v1Tinted,
+          v2Tinted,
+          v1FileName,
+          v2FileName,
+          v2Offset,
+          annotations,
+          zoom
+        };
+        
+        console.log('Stringifying project data...');
+        const json = JSON.stringify(project);
+        const blob = new Blob([json], { type: 'application/json' });
+        
+        console.log('Creating object URL...');
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = `${fileName}.comp`;
+        link.href = url;
+        document.body.appendChild(link);
+        link.click();
+        
+        // Cleanup with delay
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          setIsLoading(false);
+        }, 500);
+      } catch (err) {
+        setIsLoading(false);
+        console.error('Save Project failed:', err);
+        alert('Failed to save project file. The project data might be too large for the browser to handle as a single file.');
+      }
+    }, 100);
   };
 
   const handleOpenProject = (e: React.ChangeEvent<HTMLInputElement>) => {
