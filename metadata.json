@@ -1,0 +1,5 @@
+{
+  "name": "CompPDF",
+  "description": "A professional PDF comparison tool with overlay, alignment, and annotation features.",
+  "requestFramePermissions": []
+}
