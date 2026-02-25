@@ -50,6 +50,7 @@ export default function App() {
   const [v1DataUrl, setV1DataUrl] = useState<string | null>(null);
   const [v2DataUrl, setV2DataUrl] = useState<string | null>(null);
   const [v1Tinted, setV1Tinted] = useState<string | null>(null);
+  const [v1GrayTinted, setV1GrayTinted] = useState<string | null>(null);
   const [v2Tinted, setV2Tinted] = useState<string | null>(null);
   const [v1FileName, setV1FileName] = useState<string | null>(null);
   const [v2FileName, setV2FileName] = useState<string | null>(null);
@@ -85,6 +86,7 @@ export default function App() {
 
   // Images
   const [v1Img, v1Status] = useImage(v1Tinted || '');
+  const [v1GrayImg] = useImage(v1GrayTinted || '');
   const [v2Img, v2Status] = useImage(v2Tinted || '');
 
   useEffect(() => {
@@ -131,6 +133,8 @@ export default function App() {
         setV1DataUrl(dataUrl);
         const tinted = await tintImage(dataUrl, 'red');
         setV1Tinted(tinted);
+        const grayTinted = await tintImage(dataUrl, 'gray');
+        setV1GrayTinted(grayTinted);
       } else {
         setV2FileName(file.name);
         const dataUrl = await renderPdfPageToDataUrl(file);
@@ -294,6 +298,7 @@ export default function App() {
     setV1DataUrl(null);
     setV2DataUrl(null);
     setV1Tinted(null);
+    setV1GrayTinted(null);
     setV2Tinted(null);
     setV1FileName(null);
     setV2FileName(null);
@@ -376,6 +381,7 @@ export default function App() {
           v1DataUrl,
           v2DataUrl,
           v1Tinted,
+          v1GrayTinted,
           v2Tinted,
           v1FileName,
           v2FileName,
@@ -419,6 +425,14 @@ export default function App() {
       setV1DataUrl(project.v1DataUrl);
       setV2DataUrl(project.v2DataUrl);
       setV1Tinted(project.v1Tinted);
+      
+      // Regenerate gray tinted version if missing (for backward compatibility)
+      if (!project.v1GrayTinted && project.v1DataUrl) {
+        tintImage(project.v1DataUrl, 'gray').then(setV1GrayTinted);
+      } else {
+        setV1GrayTinted(project.v1GrayTinted || null);
+      }
+      
       setV2Tinted(project.v2Tinted);
       setV1FileName(project.v1FileName || null);
       setV2FileName(project.v2FileName || null);
@@ -715,16 +729,27 @@ export default function App() {
               />
             )}
             
-            {/* V2 Image */}
+            {/* V2 Image and Overlap Gray */}
             {v2Img && v2Visible && (
-              <KonvaImage
-                image={v2Img}
-                x={v2Offset.x}
-                y={v2Offset.y}
-                draggable={activeTool === 'move' && !isMoveLocked}
-                onDragMove={handleV2Drag}
-                opacity={0.7}
-              />
+              <Group>
+                <KonvaImage
+                  image={v2Img}
+                  x={v2Offset.x}
+                  y={v2Offset.y}
+                  draggable={activeTool === 'move' && !isMoveLocked}
+                  onDragMove={handleV2Drag}
+                  opacity={0.7}
+                />
+                {v1GrayImg && v1Visible && (
+                  <KonvaImage
+                    image={v1GrayImg}
+                    x={0}
+                    y={0}
+                    opacity={0.7}
+                    globalCompositeOperation="source-atop"
+                  />
+                )}
+              </Group>
             )}
 
             {/* Annotations */}

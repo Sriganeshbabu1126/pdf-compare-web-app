@@ -39,7 +39,7 @@ export async function renderPdfPageToDataUrl(file: File, pageNum: number = 1): P
   }
 }
 
-export function tintImage(dataUrl: string, color: 'red' | 'blue'): Promise<string> {
+export function tintImage(dataUrl: string, color: 'red' | 'blue' | 'gray'): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -74,10 +74,14 @@ export function tintImage(dataUrl: string, color: 'red' | 'blue'): Promise<strin
             data[i] = 255;
             data[i + 1] = 0;
             data[i + 2] = 0;
-          } else {
+          } else if (color === 'blue') {
             data[i] = 0;
             data[i + 1] = 0;
             data[i + 2] = 255;
+          } else if (color === 'gray') {
+            data[i] = 128;
+            data[i + 1] = 128;
+            data[i + 2] = 128;
           }
           data[i + 3] = 255; // Full opacity for tinted parts to make them visible
         }

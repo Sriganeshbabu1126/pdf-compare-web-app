@@ -16,6 +16,7 @@ export interface CompareProject {
   v1DataUrl: string | null;
   v2DataUrl: string | null;
   v1Tinted: string | null;
+  v1GrayTinted?: string | null;
   v2Tinted: string | null;
   v1FileName?: string | null;
   v2FileName?: string | null;
