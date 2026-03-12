@@ -579,7 +579,7 @@ export default function App() {
                 loop={!isExiting}
                 className="max-w-full max-h-full object-contain"
               >
-                <source src="logo.mp4" type="video/mp4" />
+//                <source src="logo.mp4" type="video/mp4" />
                 Your browser does not support the video tag.
               </video>
               <div className="absolute bottom-12 text-white text-center">
