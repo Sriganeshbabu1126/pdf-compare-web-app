@@ -12,7 +12,8 @@ import {
   Line, 
   Arrow, 
   Text as KonvaText,
-  Group
+  Group,
+  Path
 } from 'react-konva';
 import useImage from 'use-image';
 import { 
@@ -73,7 +74,7 @@ export default function App() {
   const [isComparing, setIsComparing] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [lastPointerPos, setLastPointerPos] = useState({ x: 0, y: 0 });
-  const [showLogo, setShowLogo] = useState(true);
+  const [showLogo, setShowLogo] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [dragOverV1, setDragOverV1] = useState(false);
   const [dragOverV2, setDragOverV2] = useState(false);
@@ -169,12 +170,44 @@ export default function App() {
     else setDragOverV2(false);
     
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type === 'application/pdf') {
+    if (file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
       processFile(file, version);
     } else {
       alert('Please upload a valid PDF file.');
     }
   };
+
+  // Arrow key nudge for V2
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isComparing || isMoveLocked || activeTool !== 'move') return;
+      
+      // Prevent scrolling with arrows when nudging
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+      }
+
+      const step = e.shiftKey ? 10 : 1;
+      
+      switch (e.key) {
+        case 'ArrowUp':
+          setV2Offset(prev => ({ ...prev, y: prev.y - step }));
+          break;
+        case 'ArrowDown':
+          setV2Offset(prev => ({ ...prev, y: prev.y + step }));
+          break;
+        case 'ArrowLeft':
+          setV2Offset(prev => ({ ...prev, x: prev.x - step }));
+          break;
+        case 'ArrowRight':
+          setV2Offset(prev => ({ ...prev, x: prev.x + step }));
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isComparing, isMoveLocked, activeTool]);
 
   // Zoom handling
   const handleWheel = (e: any) => {
@@ -201,6 +234,9 @@ export default function App() {
   // Drawing Logic
   const [newAnnotation, setNewAnnotation] = useState<Annotation | null>(null);
 
+  const [textInput, setTextInput] = useState<{ x: number, y: number, id: string } | null>(null);
+  const [textInputValue, setTextInputValue] = useState('');
+
   const handleMouseDown = (e: any) => {
     // Middle mouse button (button 1) for panning
     if (e.evt.button === 1) {
@@ -220,13 +256,8 @@ export default function App() {
     const id = Math.random().toString(36).substring(7);
     
     if (activeTool === 'text') {
-      // Use a timeout to avoid interrupting the event loop
-      setTimeout(() => {
-        const text = prompt('Enter text:');
-        if (text) {
-          setAnnotations(prev => [...prev, { id, type: 'text', x, y, text, color: drawColor }]);
-        }
-      }, 10);
+      setTextInput({ x, y, id });
+      setTextInputValue('');
       return;
     }
 
@@ -323,44 +354,39 @@ export default function App() {
       return;
     }
     
-    const fileName = prompt('Enter filename for JPG:', v1FileName ? `${v1FileName.split('.')[0]}_compare` : 'compare-pdf');
-    if (!fileName) return;
+    const fileName = v1FileName ? `${v1FileName.split('.')[0]}_compare` : 'compare-pdf';
 
     setIsLoading(true);
     
-    // Use a small timeout to allow the loading overlay to show
+    // Fit to screen first so we capture the whole document
+    handleFitToScreen();
+    
+    // Wait for state updates and re-render
     setTimeout(() => {
       try {
-        console.log('Generating DataURL...');
-        // Use pixelRatio: 1 for maximum compatibility and speed
         const uri = stage.toDataURL({ 
-          pixelRatio: 1,
+          pixelRatio: 2,
           mimeType: 'image/jpeg',
-          quality: 0.8
+          quality: 0.9
         });
         
         if (!uri || uri === 'data:,') {
           throw new Error('Generated image is empty');
         }
 
-        console.log('Triggering download...');
         const link = document.createElement('a');
         link.download = `${fileName}.jpg`;
         link.href = uri;
         document.body.appendChild(link);
         link.click();
-        
-        // Cleanup with delay
-        setTimeout(() => {
-          document.body.removeChild(link);
-          setIsLoading(false);
-        }, 100);
+        document.body.removeChild(link);
+        setIsLoading(false);
       } catch (err) {
         setIsLoading(false);
         console.error('Save JPG failed:', err);
-        alert('Failed to save JPG. The comparison might be too large for your browser to process as a single image. Try zooming out or using a smaller window.');
+        alert('Failed to save JPG. If the document is very large, try zooming out or reducing the window size before saving.');
       }
-    }, 100);
+    }, 300);
   };
 
   const handleSaveProject = () => {
@@ -471,19 +497,60 @@ export default function App() {
     });
   };
 
-  // Render Cloud Shape (Simplified as a bumpy rect)
+  // Render Cloud Shape (Scalloped Rectangle)
   const renderCloud = (ann: Annotation) => {
     const { x, y, width = 0, height = 0, color } = ann;
+    if (Math.abs(width) < 10 || Math.abs(height) < 10) return null;
+
+    const absWidth = Math.abs(width);
+    const absHeight = Math.abs(height);
+    const startX = width > 0 ? x : x + width;
+    const startY = height > 0 ? y : y + height;
+
+    const scallopSize = 30;
+    const horizontalScallops = Math.max(2, Math.floor(absWidth / scallopSize));
+    const verticalScallops = Math.max(2, Math.floor(absHeight / scallopSize));
+    
+    const actualScallopW = absWidth / horizontalScallops;
+    const actualScallopH = absHeight / verticalScallops;
+
+    let pathData = `M ${startX} ${startY}`;
+    
+    // Top edge
+    for (let i = 0; i < horizontalScallops; i++) {
+      const cx = startX + (i + 0.5) * actualScallopW;
+      const cy = startY - 10;
+      pathData += ` Q ${cx} ${cy} ${startX + (i + 1) * actualScallopW} ${startY}`;
+    }
+    
+    // Right edge
+    for (let i = 0; i < verticalScallops; i++) {
+      const cx = startX + absWidth + 10;
+      const cy = startY + (i + 0.5) * actualScallopH;
+      pathData += ` Q ${cx} ${cy} ${startX + absWidth} ${startY + (i + 1) * actualScallopH}`;
+    }
+    
+    // Bottom edge
+    for (let i = horizontalScallops - 1; i >= 0; i--) {
+      const cx = startX + (i + 0.5) * actualScallopW;
+      const cy = startY + absHeight + 10;
+      pathData += ` Q ${cx} ${cy} ${startX + i * actualScallopW} ${startY + absHeight}`;
+    }
+    
+    // Left edge
+    for (let i = verticalScallops - 1; i >= 0; i--) {
+      const cx = startX - 10;
+      const cy = startY + (i + 0.5) * actualScallopH;
+      pathData += ` Q ${cx} ${cy} ${startX} ${startY + i * actualScallopH}`;
+    }
+
+    pathData += ' Z';
+
     return (
-      <Rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
+      <Path
+        data={pathData}
         stroke={color}
-        strokeWidth={4}
-        dash={[10, 5]} // Cloud-like dash
-        cornerRadius={10}
+        strokeWidth={3}
       />
     );
   };
@@ -512,12 +579,6 @@ export default function App() {
               <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-xl py-2 z-50">
                 <button onClick={() => { handleNew(); setIsMenuOpen(null); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 flex items-center gap-3 text-sm">
                   <Plus size={16} /> New Compare PDF
-                </button>
-                <button onClick={() => { fileInputProject.current?.click(); setIsMenuOpen(null); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 flex items-center gap-3 text-sm">
-                  <FolderOpen size={16} /> Open Existing Compare PDF
-                </button>
-                <button onClick={() => { handleSaveProject(); setIsMenuOpen(null); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 flex items-center gap-3 text-sm">
-                  <Save size={16} /> Save Project (.comp)
                 </button>
                 <button onClick={() => { handleSaveJpg(); setIsMenuOpen(null); }} className="w-full text-left px-4 py-2 hover:bg-indigo-50 flex items-center gap-3 text-sm">
                   <Download size={16} /> Save current status to JPG
@@ -579,7 +640,7 @@ export default function App() {
                 loop={!isExiting}
                 className="max-w-full max-h-full object-contain"
               >
-//                <source src="logo.mp4" type="video/mp4" />
+                <source src="logo.mp4" type="video/mp4" />
                 Your browser does not support the video tag.
               </video>
               <div className="absolute bottom-12 text-white text-center">
@@ -677,7 +738,10 @@ export default function App() {
             {v1DataUrl && v2DataUrl && (
               <div className="mt-8">
                 <button 
-                  onClick={() => setIsComparing(true)}
+                  onClick={() => {
+                    setIsComparing(true);
+                    setIsMoveLocked(true);
+                  }}
                   className="px-12 py-4 bg-indigo-600 text-white rounded-full font-bold text-lg shadow-2xl hover:bg-indigo-700 hover:scale-105 transition-all flex items-center gap-3"
                 >
                   <FileUp size={24} />
@@ -726,6 +790,7 @@ export default function App() {
                 x={0}
                 y={0}
                 opacity={0.7}
+                listening={false}
               />
             )}
             
@@ -747,6 +812,7 @@ export default function App() {
                     y={0}
                     opacity={0.7}
                     globalCompositeOperation="source-atop"
+                    listening={false}
                   />
                 )}
               </Group>
@@ -843,7 +909,7 @@ export default function App() {
                   onClick={() => setActiveTool(activeTool === 'move' ? null : 'move')}
                   onDoubleClick={() => setActiveTool(null)}
                   icon={<Move size={20} />}
-                  label="Move V2 (Double click to exit)"
+                  label="Move V2 (Arrows to nudge, Shift+Arrows for 10px)"
                 />
                 <ToolButton 
                   active={isMoveLocked} 
@@ -986,6 +1052,92 @@ export default function App() {
                 <Download size={12} /> Save current status
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Text Input Overlay */}
+        {textInput && (
+          <div 
+            className="absolute z-[100] bg-white p-2 rounded-lg shadow-2xl border border-indigo-200"
+            style={{ 
+              left: (textInput.x * zoom) + stagePos.x, 
+              top: (textInput.y * zoom) + stagePos.y - 40,
+              transform: 'translate(-50%, -100%)'
+            }}
+          >
+            <div className="flex flex-col gap-2 min-w-[200px]">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-indigo-600 uppercase">Add Text</span>
+                <button onClick={() => setTextInput(null)} className="text-gray-400 hover:text-gray-600">
+                  <X size={14} />
+                </button>
+              </div>
+              <textarea
+                autoFocus
+                value={textInputValue}
+                onChange={(e) => setTextInputValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (textInputValue.trim()) {
+                      setAnnotations(prev => [...prev, { 
+                        id: textInput.id, 
+                        type: 'text', 
+                        x: textInput.x, 
+                        y: textInput.y, 
+                        text: textInputValue, 
+                        color: drawColor 
+                      }]);
+                    }
+                    setTextInput(null);
+                  }
+                  if (e.key === 'Escape') {
+                    setTextInput(null);
+                  }
+                }}
+                className="w-full p-2 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 min-h-[60px]"
+                placeholder="Type text and press Enter..."
+              />
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setTextInput(null)}
+                  className="px-2 py-1 text-[10px] font-bold text-gray-500 hover:bg-gray-100 rounded"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    if (textInputValue.trim()) {
+                      setAnnotations(prev => [...prev, { 
+                        id: textInput.id, 
+                        type: 'text', 
+                        x: textInput.x, 
+                        y: textInput.y, 
+                        text: textInputValue, 
+                        color: drawColor 
+                      }]);
+                    }
+                    setTextInput(null);
+                  }}
+                  className="px-2 py-1 text-[10px] font-bold bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                >
+                  Add Text
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tool Overlay Info */}
+        {isComparing && activeTool === 'move' && !isMoveLocked && (
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 bg-indigo-600/90 backdrop-blur-sm text-white px-6 py-3 rounded-2xl shadow-2xl text-xs font-bold animate-bounce z-[60] border border-white/20 flex items-center gap-3">
+            <div className="flex gap-1">
+              <kbd className="bg-white/20 px-1.5 py-0.5 rounded border border-white/30">↑</kbd>
+              <kbd className="bg-white/20 px-1.5 py-0.5 rounded border border-white/30">↓</kbd>
+              <kbd className="bg-white/20 px-1.5 py-0.5 rounded border border-white/30">←</kbd>
+              <kbd className="bg-white/20 px-1.5 py-0.5 rounded border border-white/30">→</kbd>
+            </div>
+            <span>Use Arrow Keys to nudge for fine adjustment (Shift for 10px)</span>
           </div>
         )}
       </div>

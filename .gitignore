@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Media files
+*.mp3
+*.mp4
+*.wav
+*.mov
